@@ -26,6 +26,7 @@ impl private::Sealed for BQuaternion {}
 impl LineValue for BQuaternion {}
 
 
+// FIXME: verify line group is from same breadboard
 pub trait InputGroup<T: LineValue> {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner>;
 

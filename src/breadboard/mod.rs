@@ -119,6 +119,10 @@ impl Breadboard {
         std::fs::write(path, bp_file)
     }
 
+    fn verify_line<T: LineValue>(&self, line: Line<T>) {
+        assert!(self as *const _ as usize == line.breadboard as *const _ as usize, "invalid line passed into breadboard")
+    }
+
     /// Inserts the component into the breadboard and returns its index
     fn insert_component<C: Component + 'static>(&self, component: C) -> usize {
         let mut components = self.components.borrow_mut();
@@ -128,7 +132,7 @@ impl Breadboard {
 
     /// Inserts a component with 1 output
     fn insert_component_with_output<C: Component + 'static, T: LineValue>(&self, component: C) -> Line<T> {
-        Line::new(self.insert_component(component), 0)
+        Line::new(self, self.insert_component(component), 0)
     }
 
     pub fn constant(&self, n: f32) -> Line<BNumber> {
@@ -162,7 +166,7 @@ impl Breadboard {
             typ: speed_type,
         })
     }
-
+ 
     pub fn velocity(&self, speed_type: VelocityOutputType) -> Line<BVector3> {
         self.insert_component_with_output(Velocity {
             typ: speed_type,
@@ -188,13 +192,13 @@ impl Breadboard {
         let component_id = self.insert_component(TargetInfo);
 
         TargetInfoOutputs {
-            present: Line::new(component_id, 0),
-            distance: Line::new(component_id, 1),
-            altitude: Line::new(component_id, 2),
-            bearing: Line::new(component_id, 3),
-            position: Line::new(component_id, 4),
-            velocity: Line::new(component_id, 5),
-            volume: Line::new(component_id, 6),
+            present: Line::new(self, component_id, 0),
+            distance: Line::new(self, component_id, 1),
+            altitude: Line::new(self, component_id, 2),
+            bearing: Line::new(self, component_id, 3),
+            position: Line::new(self, component_id, 4),
+            velocity: Line::new(self, component_id, 5),
+            volume: Line::new(self, component_id, 6),
         }
     }
 
@@ -210,6 +214,9 @@ impl Breadboard {
 
     // TODO: maybe allow vectore here as well, switch also works with vectors, but the behavior is very wierd (vector magnitude is passed through)
     pub fn switch<'a>(&'a self, passthrough: Line<'a, BNumber>, switch_signal: Line<'a, BNumber>, options: SwitchOptions) -> Line<'a, BNumber> {
+        self.verify_line(passthrough);
+        self.verify_line(switch_signal);
+
         self.insert_component_with_output(Switch {
             inputs: [passthrough.inner, switch_signal.inner],
             threshhold: options.threshhold.clamp(-10000.0, 10000.0),
@@ -264,20 +271,21 @@ pub struct LineInner {
     output_index: usize,
 }
 
-#[derive(Debug)]
 pub struct Line<'a, T: LineValue + ?Sized> {
     inner: LineInner,
     // the line pretends it owns a type T inside the breadboard in its wires
-    _marker: PhantomData<&'a T>,
+    breadboard: &'a Breadboard,
+    _marker: PhantomData<T>,
 }
 
 impl<'a, T: LineValue> Line<'a, T> {
-    fn new(component_index: usize, output_index: usize) -> Self {
+    fn new(breadboard: &'a Breadboard, component_index: usize, output_index: usize) -> Self {
         Line {
             inner: LineInner {
                 component_index,
                 output_index,
             },
+            breadboard,
             _marker: PhantomData,
         }
     }

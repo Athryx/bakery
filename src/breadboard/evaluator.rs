@@ -3,9 +3,9 @@ use core::fmt::{self, Display, Write};
 use uuid::{Uuid, uuid};
 
 use crate::ftd_data::{SectionData, DataEntry};
-use super::{Component, LineInner};
+use super::{BNumber, Breadboard, Component, Line, LineInner, LineValue};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Evaluator {
     inputs: Vec<LineInner>,
     // there is one expression for each output
@@ -53,6 +53,41 @@ impl Component for Evaluator {
     fn inputs(&self) -> &[LineInner] {
         self.inputs.as_slice()
     }
+}
+
+macro_rules! make_bb_method {
+    ($name:ident, $variant:ident, $in_type:ty, $out_type:ty) => {
+        fn $name<'a>(&'a self, input: Line<'a, $in_type>) -> Line<'a, $out_type> {
+            let mut eval = Evaluator::default();
+
+            let input_expr = eval.get_input(input.inner).unwrap();
+            eval.exprs.push(EvaluatorExpression::$variant(Box::new(input_expr)));
+
+            self.insert_component_with_output(eval)
+        }
+    };
+
+    ($name:ident, $variant:ident, $in_type1:ty, $in_type2:ty, $out_type:ty) => {
+        fn $name<'a>(&'a self, input1: Line<'a, $in_type1>, input2: Line<'a, $in_type2>) -> Line<'a, $out_type> {
+            let mut eval = Evaluator::default();
+
+            let input_expr1 = eval.get_input(input1.inner).unwrap();
+            let input_expr2 = eval.get_input(input2.inner).unwrap();
+            eval.exprs.push(EvaluatorExpression::$variant(Box::new(input_expr1), Box::new(input_expr2)));
+
+            self.insert_component_with_output(eval)
+        }
+    };
+}
+
+impl Breadboard {
+    make_bb_method!(sin, Sin, BNumber, BNumber);
+    make_bb_method!(cos, Cos, BNumber, BNumber);
+    make_bb_method!(tan, Tan, BNumber, BNumber);
+    make_bb_method!(sqrt, Sqrt, BNumber, BNumber);
+    make_bb_method!(asin, Asin, BNumber, BNumber);
+    make_bb_method!(acos, Acos, BNumber, BNumber);
+    make_bb_method!(atan, Atan, BNumber, BNumber);
 }
 
 #[derive(Debug)]
@@ -149,6 +184,16 @@ pub enum EvaluatorExpression {
     Div(Box<Self>, Box<Self>),
     // workse for 2 numbers (remainder)
     Mod(Box<Self>, Box<Self>),
+    Eq(Box<Self>, Box<Self>),
+    Ne(Box<Self>, Box<Self>),
+    Gt(Box<Self>, Box<Self>),
+    Gte(Box<Self>, Box<Self>),
+    Lt(Box<Self>, Box<Self>),
+    Lte(Box<Self>, Box<Self>),
+    OpAnd(Box<Self>, Box<Self>),
+    OpOr(Box<Self>, Box<Self>),
+    FalseCoalesce(Box<Self>, Box<Self>),
+    Negate(Box<Self>),
 }
 
 impl EvaluatorExpression {
@@ -183,6 +228,76 @@ impl Display for EvaluatorExpression {
             Self::Exp(val) => write!(f, "Exp({val})"),
             Self::Log(val) => write!(f, "Log({val})"),
             Self::Pow(val1, val2) => write!(f, "Pow({val1}, {val2})"),
+            Self::Abs(val) => write!(f, "Abs({val})"),
+            Self::Sign(val) => write!(f, "Sign({val})"),
+            Self::Round(val) => write!(f, "Round({val})"),
+            Self::Floor(val) => write!(f, "Floor({val})"),
+            Self::Ceil(val) => write!(f, "Ceil({val})"),
+            Self::Max2(val1, val2) => write!(f, "Max({val1}, {val2})"),
+            Self::Max3(val1, val2, val3) => write!(f, "Max({val1}, {val2}, {val3})"),
+            Self::MaxV(val) => write!(f, "Max({val})"),
+            Self::Min2(val1, val2) => write!(f, "Min({val1}, {val2})"),
+            Self::Min3(val1, val2, val3) => write!(f, "Min({val1}, {val2}, {val3})"),
+            Self::MinV(val) => write!(f, "Min({val})"),
+            Self::If {
+                condition,
+                true_value,
+                false_value,
+            } => write!(f, "If({condition}, {true_value}, {false_value})"),
+            Self::Vector(val1, val2, val3) => write!(f, "Vector({val1}, {val2}, {val3})"),
+            Self::MakeRotationBetween {
+                from_vector,
+                to_vector,
+            } => write!(f, "FromToRot({from_vector}, {to_vector}"),
+            Self::FromEuler {
+                pitch,
+                yaw,
+                roll,
+            } => write!(f, "FromEuler({pitch}, {yaw}, {roll})"),
+            Self::FromEularV(val) => write!(f, "FromEuler({val})"),
+            Self::ToEularV(val) => write!(f, "ToEuler({val})"),
+            Self::Angle(val) => write!(f, "Angle({val})"),
+            Self::Axis(val) => write!(f, "Axis({val})"),
+            Self::AngleBetween {
+                from_vector,
+                to_vector,
+            } => write!(f, "Angle({from_vector}, {to_vector})"),
+            Self::SetX {
+                vector,
+                x,
+            } => write!(f, "setX({vector}, {x})"),
+            Self::SetY {
+                vector,
+                y,
+            } => write!(f, "setX({vector}, {y})"),
+            Self::SetZ {
+                vector,
+                z,
+            } => write!(f, "setX({vector}, {z})"),
+            Self::OutputV(val) => write!(f, "outputV({val})"),
+            Self::Output(val) => write!(f, "output({val})"),
+            Self::GetX(val) => write!(f, "({val}).x"),
+            Self::GetY(val) => write!(f, "({val}).y"),
+            Self::GetZ(val) => write!(f, "({val}).z"),
+            Self::Magnitude(val) => write!(f, "({val}).magnitude"),
+            Self::SqruareMagnitude(val) => write!(f, "({val}).sqrMagnitude"),
+            Self::RotationInverse(val) => write!(f, "({val}).inverse"),
+            Self::Add(lhs, rhs) => write!(f, "({lhs}) + ({rhs})"),
+            Self::Sub(lhs, rhs) => write!(f, "({lhs}) - ({rhs})"),
+            Self::Cross(lhs, rhs) => write!(f, "({lhs}) x ({rhs})"),
+            Self::Mul(lhs, rhs) => write!(f, "({lhs}) * ({rhs})"),
+            Self::Div(lhs, rhs) => write!(f, "({lhs}) / ({rhs})"),
+            Self::Mod(lhs, rhs) => write!(f, "({lhs}) % ({rhs})"),
+            Self::Eq(lhs, rhs) => write!(f, "({lhs}) = ({rhs})"),
+            Self::Ne(lhs, rhs) => write!(f, "({lhs}) != ({rhs})"),
+            Self::Gt(lhs, rhs) => write!(f, "({lhs}) > ({rhs})"),
+            Self::Gte(lhs, rhs) => write!(f, "({lhs}) >= ({rhs})"),
+            Self::Lt(lhs, rhs) => write!(f, "({lhs}) < ({rhs})"),
+            Self::Lte(lhs, rhs) => write!(f, "({lhs}) <= ({rhs})"),
+            Self::OpAnd(lhs, rhs) => write!(f, "({lhs}) & ({rhs})"),
+            Self::OpOr(lhs, rhs) => write!(f, "({lhs}) | ({rhs})"),
+            Self::FalseCoalesce(lhs, rhs) => write!(f, "({lhs}) or ({rhs})"),
+            Self::Negate(val) => write!(f, "-({val})"),
         }
     }
 }
