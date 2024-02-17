@@ -3,15 +3,15 @@ mod line_value;
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::{marker::PhantomData, path::Path};
+use std::path::Path;
 use std::io;
 use std::rc::Rc;
 
 use uuid::{Uuid, uuid};
 
 pub use line_value::*;
+use crate::find_prefabs_folder;
 use crate::ftd_data::{ftd_uuid_to_uuid, BlockData, BlueprintData, DataEntry, SectionData, SectionId, Vector2};
-use evaluator::Evaluator;
 
 /// Ids used for components to avoid interfering with other ids
 const COMPONENT_ID_START: u32 = 72542;
@@ -131,6 +131,11 @@ impl Breadboard {
         bp_file.push_str(r#"","VehicleData":"sct0AAAAAAAA","designChanged":false,"blueprintVersion":0,"blueprintName":"TEST_BREADBOARD","SerialisedInfo":{"JsonDictionary":{},"IsEmpty":true},"Name":null,"ItemNumber":0,"LocalPosition":"0,0,0","LocalRotation":"0,0,0,0","ForceId":0,"TotalBlockCount":1,"MaxCords":"1,1,1","MinCords":"0,0,0","BlockIds":[227],"BlockState":null,"AliveCount":1,"BlockStringData":null,"BlockStringDataIds":null,"GameVersion":"3.8.0.4","PersistentSubObjectIndex":-1,"PersistentBlockIndex":-1,"AuthorDetails":{"Valid":true,"ForeignBlocks":0,"CreatorId":"0ab41fc3-fd53-4843-becf-7608b7c315b7","ObjectId":"5bb43b25-8e79-4e92-9db3-076b363114a7","CreatorReadableName":"DeltaForce","HashV1":"6831413c85b3e408740dc00f5580382c"},"BlockCount":1}}"#);
         
         std::fs::write(path, bp_file)
+    }
+
+    pub fn save_to_prefab_file_in_game_folder(&self, name: &str) -> io::Result<()> {
+        let path = find_prefabs_folder().join(format!("{name}.blueprint"));
+        self.save_to_prefab_file(path)
     }
 
     fn verify_line<T: LineValue + ?Sized>(&self, line: &Line<T>) {
@@ -276,43 +281,6 @@ trait Component {
     fn section_data(&self) -> SectionData;
     fn num_outputs(&self) -> usize;
     fn inputs(&self) -> &[LineInner];
-}
-
-/// Represents the output line of a certain breadboard component
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct LineInner {
-    component_index: usize,
-    output_index: usize,
-}
-
-pub struct Line<T: LineValue + ?Sized> {
-    inner: LineInner,
-    // the line pretends it owns a type T inside the breadboard in its wires
-    breadboard: Breadboard,
-    _marker: PhantomData<T>,
-}
-
-impl<T: LineValue + ?Sized> Line<T> {
-    fn new(breadboard: Breadboard, component_index: usize, output_index: usize) -> Self {
-        Line {
-            inner: LineInner {
-                component_index,
-                output_index,
-            },
-            breadboard,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<T: LineValue + ?Sized> Clone for Line<T> {
-    fn clone(&self) -> Self {
-        Line {
-            inner: self.inner,
-            breadboard: self.breadboard.clone(),
-            _marker: PhantomData,
-        }
-    }
 }
 
 // TODO: support constant strings

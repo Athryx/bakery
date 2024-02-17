@@ -57,19 +57,19 @@ impl Component for Evaluator {
 
 macro_rules! make_bb_method {
     ($name:ident, $variant:ident, $in_name:ident: $in_type:ty, $out_type:ty) => {
-        fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
             self.evaluator_expr($in_name, EvaluatorExpression::$variant)
         }
     };
 
     ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $out_type:ty) => {
-        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
             self.evaluator_expr2($in_name1, $in_name2, EvaluatorExpression::$variant)
         }
     };
 
     ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $in_name3:ident: $in_type3:ty, $out_type:ty) => {
-        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
             self.evaluator_expr3($in_name1, $in_name2, $in_name3, EvaluatorExpression::$variant)
         }
     };
@@ -77,7 +77,7 @@ macro_rules! make_bb_method {
 
 macro_rules! make_bb_method_named {
     ($name:ident, $variant:ident, $in_name:ident: $in_type:ty, $out_type:ty) => {
-        fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
             self.evaluator_expr($in_name, |a| EvaluatorExpression::$variant {
                 $in_name: a,
             })
@@ -85,7 +85,7 @@ macro_rules! make_bb_method_named {
     };
 
     ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $out_type:ty) => {
-        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
             self.evaluator_expr2($in_name1, $in_name2, |a, b| EvaluatorExpression::$variant {
                 $in_name1: a,
                 $in_name2: b,
@@ -94,7 +94,7 @@ macro_rules! make_bb_method_named {
     };
 
     ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $in_name3:ident: $in_type3:ty, $out_type:ty) => {
-        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
+        pub fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
             self.evaluator_expr3($in_name1, $in_name2, $in_name3, |a, b, c| EvaluatorExpression::$variant {
                 $in_name1: a,
                 $in_name2: b,
@@ -156,6 +156,19 @@ impl Breadboard {
         self.insert_component_with_output(eval)
     }
 
+    pub fn new_vector(&self, x: f64, y: f64, z: f64) -> Line<BVector3> {
+        let expr = EvaluatorExpression::Vector(
+            Box::new(EvaluatorExpression::Float(x)),
+            Box::new(EvaluatorExpression::Float(y)),
+            Box::new(EvaluatorExpression::Float(z)),
+        );
+
+        let mut eval = Evaluator::default();
+        eval.exprs.push(expr);
+
+        self.insert_component_with_output(eval)
+    }
+
     make_bb_method!(sin, Sin, angle: BNumber, BNumber);
     make_bb_method!(cos, Cos, angle: BNumber, BNumber);
     make_bb_method!(tan, Tan, angle: BNumber, BNumber);
@@ -181,7 +194,7 @@ impl Breadboard {
     make_bb_method!(min3, Min3, a: BNumber, b: BNumber, c: BNumber, BNumber);
     make_bb_method!(minv, MinV, vec: BVector3, BNumber);
 
-    fn b_if<T: LineValue + ?Sized>(&self, condition: Line<BNumber>, true_value: Line<T>, false_value: Line<T>) -> Line<T> {
+    pub fn b_if<T: LineValue + ?Sized>(&self, condition: Line<BNumber>, true_value: Line<T>, false_value: Line<T>) -> Line<T> {
         self.evaluator_expr3(condition, true_value, false_value, |a, b, c| {
             EvaluatorExpression::If {
                 condition: a,
@@ -204,6 +217,10 @@ impl Breadboard {
     make_bb_method_named!(set_z, SetZ, vector: BVector3, z: BNumber, BVector3);
 
     // properties
+    make_bb_method!(x, GetX, vector: BVector3, BNumber);
+    make_bb_method!(y, GetY, vector: BVector3, BNumber);
+    make_bb_method!(z, GetZ, vector: BVector3, BNumber);
+
     make_bb_method!(magnitude, Magnitude, vector: BVector3, BNumber);
     make_bb_method!(square_magnitude, SquareMagnitude, vector: BVector3, BNumber);
     make_bb_method!(rotation_inverse, RotationInverse, rotation: BQuaternion, BQuaternion);
@@ -254,6 +271,8 @@ pub enum EvaluatorExpression {
     InputC,
     InputD,
     InputE,
+    Int(i64),
+    Float(f64),
     Sin(Box<Self>),
     Cos(Box<Self>),
     Tan(Box<Self>),
@@ -375,6 +394,8 @@ impl Display for EvaluatorExpression {
             Self::InputC => write!(f, "c"),
             Self::InputD => write!(f, "d"),
             Self::InputE => write!(f, "e"),
+            Self::Int(val) => write!(f, "{val}"),
+            Self::Float(val) => write!(f, "{val}"),
             Self::Sin(val) => write!(f, "Sin({val})"),
             Self::Cos(val) => write!(f, "Cos({val})"),
             Self::Tan(val) => write!(f, "Tan({val})"),
