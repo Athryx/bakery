@@ -2,8 +2,10 @@ mod evaluator;
 mod line_value;
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{marker::PhantomData, path::Path};
 use std::io;
+use std::rc::Rc;
 
 use uuid::{Uuid, uuid};
 
@@ -63,14 +65,26 @@ impl BreadboardWireMap {
     }
 }
 
-#[derive(Default)]
-pub struct Breadboard {
+static NEXT_BREADBOARD_ID: AtomicUsize = AtomicUsize::new(0);
+
+struct BreadboardInner {
+    id: usize,
     components: RefCell<Vec<Box<dyn Component>>>,
 }
 
+#[derive(Clone)]
+pub struct Breadboard(Rc<BreadboardInner>);
+
 impl Breadboard {
+    pub fn new() -> Self {
+        Breadboard(Rc::new(BreadboardInner {
+            id: NEXT_BREADBOARD_ID.fetch_add(1, Ordering::Relaxed),
+            components: RefCell::default(),
+        }))
+    }
+
     fn block_data(&self) -> BlockData {
-        let components = self.components.borrow();
+        let components = self.0.components.borrow();
 
         let mut wire_map = BreadboardWireMap::new(components.len());
         let mut data = BlockData::default();
@@ -119,20 +133,20 @@ impl Breadboard {
         std::fs::write(path, bp_file)
     }
 
-    fn verify_line<T: LineValue>(&self, line: Line<T>) {
-        assert!(self as *const _ as usize == line.breadboard as *const _ as usize, "invalid line passed into breadboard")
+    fn verify_line<T: LineValue + ?Sized>(&self, line: &Line<T>) {
+        assert!(self.0.id == line.breadboard.0.id, "invalid line passed into breadboard");
     }
 
     /// Inserts the component into the breadboard and returns its index
     fn insert_component<C: Component + 'static>(&self, component: C) -> usize {
-        let mut components = self.components.borrow_mut();
+        let mut components = self.0.components.borrow_mut();
         components.push(Box::new(component));
         components.len() - 1
     }
 
     /// Inserts a component with 1 output
-    fn insert_component_with_output<C: Component + 'static, T: LineValue>(&self, component: C) -> Line<T> {
-        Line::new(self, self.insert_component(component), 0)
+    fn insert_component_with_output<C: Component + 'static, T: LineValue + ?Sized>(&self, component: C) -> Line<T> {
+        Line::new(self.clone(), self.insert_component(component), 0)
     }
 
     pub fn constant(&self, n: f32) -> Line<BNumber> {
@@ -175,16 +189,16 @@ impl Breadboard {
 }
 
 /// This contains all info returnd by the primary target info component
-#[derive(Clone, Copy)]
-pub struct TargetInfoOutputs<'a> {
-    pub present: Line<'a, BNumber>,
-    pub distance: Line<'a, BNumber>,
-    pub altitude: Line<'a, BNumber>,
+#[derive(Clone)]
+pub struct TargetInfoOutputs {
+    pub present: Line<BNumber>,
+    pub distance: Line<BNumber>,
+    pub altitude: Line<BNumber>,
     /// Target bearing relative to our forward in degress (range of [-180, 180])
-    pub bearing: Line<'a, BNumber>,
-    pub position: Line<'a, BVector3>,
-    pub velocity: Line<'a, BVector3>,
-    pub volume: Line<'a, BNumber>,
+    pub bearing: Line<BNumber>,
+    pub position: Line<BVector3>,
+    pub velocity: Line<BVector3>,
+    pub volume: Line<BNumber>,
 }
 
 impl Breadboard {
@@ -192,18 +206,18 @@ impl Breadboard {
         let component_id = self.insert_component(TargetInfo);
 
         TargetInfoOutputs {
-            present: Line::new(self, component_id, 0),
-            distance: Line::new(self, component_id, 1),
-            altitude: Line::new(self, component_id, 2),
-            bearing: Line::new(self, component_id, 3),
-            position: Line::new(self, component_id, 4),
-            velocity: Line::new(self, component_id, 5),
-            volume: Line::new(self, component_id, 6),
+            present: Line::new(self.clone(), component_id, 0),
+            distance: Line::new(self.clone(), component_id, 1),
+            altitude: Line::new(self.clone(), component_id, 2),
+            bearing: Line::new(self.clone(), component_id, 3),
+            position: Line::new(self.clone(), component_id, 4),
+            velocity: Line::new(self.clone(), component_id, 5),
+            volume: Line::new(self.clone(), component_id, 6),
         }
     }
 
     // TODO: maybe allow vectors, I think multiply tachnically allows it in some cases
-    pub fn multiply<'a, T: InputGroup<BNumber>>(&'a self, inputs: &T, multiplier: f32) -> Line<'a, BNumber> {
+    pub fn multiply<T: InputGroup<BNumber>>(&self, inputs: &T, multiplier: f32) -> Line<BNumber> {
         let multiplier = multiplier.clamp(-100.0, 100.0);
 
         self.insert_component_with_output(Multiply {
@@ -213,9 +227,9 @@ impl Breadboard {
     }
 
     // TODO: maybe allow vectore here as well, switch also works with vectors, but the behavior is very wierd (vector magnitude is passed through)
-    pub fn switch<'a>(&'a self, passthrough: Line<'a, BNumber>, switch_signal: Line<'a, BNumber>, options: SwitchOptions) -> Line<'a, BNumber> {
-        self.verify_line(passthrough);
-        self.verify_line(switch_signal);
+    pub fn switch(&self, passthrough: Line<BNumber>, switch_signal: Line<BNumber>, options: SwitchOptions) -> Line<BNumber> {
+        self.verify_line(&passthrough);
+        self.verify_line(&switch_signal);
 
         self.insert_component_with_output(Switch {
             inputs: [passthrough.inner, switch_signal.inner],
@@ -271,15 +285,15 @@ pub struct LineInner {
     output_index: usize,
 }
 
-pub struct Line<'a, T: LineValue + ?Sized> {
+pub struct Line<T: LineValue + ?Sized> {
     inner: LineInner,
     // the line pretends it owns a type T inside the breadboard in its wires
-    breadboard: &'a Breadboard,
+    breadboard: Breadboard,
     _marker: PhantomData<T>,
 }
 
-impl<'a, T: LineValue> Line<'a, T> {
-    fn new(breadboard: &'a Breadboard, component_index: usize, output_index: usize) -> Self {
+impl<T: LineValue + ?Sized> Line<T> {
+    fn new(breadboard: Breadboard, component_index: usize, output_index: usize) -> Self {
         Line {
             inner: LineInner {
                 component_index,
@@ -291,13 +305,15 @@ impl<'a, T: LineValue> Line<'a, T> {
     }
 }
 
-impl<T: LineValue + ?Sized> Clone for Line<'_, T> {
+impl<T: LineValue + ?Sized> Clone for Line<T> {
     fn clone(&self) -> Self {
-        *self
+        Line {
+            inner: self.inner,
+            breadboard: self.breadboard.clone(),
+            _marker: PhantomData,
+        }
     }
 }
-
-impl<T: LineValue + ?Sized> Copy for Line<'_, T> {}
 
 // TODO: support constant strings
 #[derive(Debug)]

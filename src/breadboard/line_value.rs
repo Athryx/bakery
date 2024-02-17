@@ -25,6 +25,11 @@ pub struct BQuaternion;
 impl private::Sealed for BQuaternion {}
 impl LineValue for BQuaternion {}
 
+pub struct BString;
+
+impl private::Sealed for BString {}
+impl LineValue for BString {}
+
 
 // FIXME: verify line group is from same breadboard
 pub trait InputGroup<T: LineValue> {
@@ -35,26 +40,26 @@ pub trait InputGroup<T: LineValue> {
     }
 }
 
-impl<T: LineValue> InputGroup<T> for Line<'_, T> {
+impl<T: LineValue> InputGroup<T> for Line<T> {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.inner)
     }
 }
 
-impl<T: LineValue> InputGroup<T> for (Line<'_, T>,) {
+impl<T: LineValue> InputGroup<T> for (Line<T>,) {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.0.inner)
     }
 }
 
-impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>) {
+impl<T: LineValue> InputGroup<T> for (Line<T>, Line<T>) {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.0.inner)
             .chain(iter::once(self.1.inner))
     }
 }
 
-impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>) {
+impl<T: LineValue> InputGroup<T> for (Line<T>, Line<T>, Line<T>) {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.0.inner)
             .chain(iter::once(self.1.inner))
@@ -62,7 +67,7 @@ impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>) {
     }
 }
 
-impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>, Line<'_, T>) {
+impl<T: LineValue> InputGroup<T> for (Line<T>, Line<T>, Line<T>, Line<T>) {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.0.inner)
             .chain(iter::once(self.1.inner))
@@ -71,7 +76,7 @@ impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>, Lin
     }
 }
 
-impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>, Line<'_, T>, Line<'_, T>) {
+impl<T: LineValue> InputGroup<T> for (Line<T>, Line<T>, Line<T>, Line<T>, Line<T>) {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         iter::once(self.0.inner)
             .chain(iter::once(self.1.inner))
@@ -81,7 +86,7 @@ impl<T: LineValue> InputGroup<T> for (Line<'_, T>, Line<'_, T>, Line<'_, T>, Lin
     }
 }
 
-impl<T: LineValue> InputGroup<T> for [Line<'_, T>] {
+impl<T: LineValue> InputGroup<T> for [Line<T>] {
     fn iter_inputs(&self) -> impl Iterator<Item = LineInner> {
         self.iter().map(|line| line.inner)
     }

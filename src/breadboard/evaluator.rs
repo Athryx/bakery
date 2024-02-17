@@ -3,7 +3,7 @@ use core::fmt::{self, Display, Write};
 use uuid::{Uuid, uuid};
 
 use crate::ftd_data::{SectionData, DataEntry};
-use super::{BNumber, Breadboard, Component, Line, LineInner, LineValue};
+use super::{BNumber, BQuaternion, BString, BVector3, Breadboard, Component, Line, LineInner, LineValue};
 
 #[derive(Debug, Default)]
 pub struct Evaluator {
@@ -56,38 +56,195 @@ impl Component for Evaluator {
 }
 
 macro_rules! make_bb_method {
-    ($name:ident, $variant:ident, $in_type:ty, $out_type:ty) => {
-        fn $name<'a>(&'a self, input: Line<'a, $in_type>) -> Line<'a, $out_type> {
-            let mut eval = Evaluator::default();
-
-            let input_expr = eval.get_input(input.inner).unwrap();
-            eval.exprs.push(EvaluatorExpression::$variant(Box::new(input_expr)));
-
-            self.insert_component_with_output(eval)
+    ($name:ident, $variant:ident, $in_name:ident: $in_type:ty, $out_type:ty) => {
+        fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
+            self.evaluator_expr($in_name, EvaluatorExpression::$variant)
         }
     };
 
-    ($name:ident, $variant:ident, $in_type1:ty, $in_type2:ty, $out_type:ty) => {
-        fn $name<'a>(&'a self, input1: Line<'a, $in_type1>, input2: Line<'a, $in_type2>) -> Line<'a, $out_type> {
-            let mut eval = Evaluator::default();
+    ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $out_type:ty) => {
+        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
+            self.evaluator_expr2($in_name1, $in_name2, EvaluatorExpression::$variant)
+        }
+    };
 
-            let input_expr1 = eval.get_input(input1.inner).unwrap();
-            let input_expr2 = eval.get_input(input2.inner).unwrap();
-            eval.exprs.push(EvaluatorExpression::$variant(Box::new(input_expr1), Box::new(input_expr2)));
+    ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $in_name3:ident: $in_type3:ty, $out_type:ty) => {
+        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
+            self.evaluator_expr3($in_name1, $in_name2, $in_name3, EvaluatorExpression::$variant)
+        }
+    };
+}
 
-            self.insert_component_with_output(eval)
+macro_rules! make_bb_method_named {
+    ($name:ident, $variant:ident, $in_name:ident: $in_type:ty, $out_type:ty) => {
+        fn $name(&self, $in_name: Line<$in_type>) -> Line<$out_type> {
+            self.evaluator_expr($in_name, |a| EvaluatorExpression::$variant {
+                $in_name: a,
+            })
+        }
+    };
+
+    ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $out_type:ty) => {
+        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>) -> Line<$out_type> {
+            self.evaluator_expr2($in_name1, $in_name2, |a, b| EvaluatorExpression::$variant {
+                $in_name1: a,
+                $in_name2: b,
+            })
+        }
+    };
+
+    ($name:ident, $variant:ident, $in_name1:ident: $in_type1:ty, $in_name2:ident: $in_type2:ty, $in_name3:ident: $in_type3:ty, $out_type:ty) => {
+        fn $name(&self, $in_name1: Line<$in_type1>, $in_name2: Line<$in_type2>, $in_name3: Line<$in_type3>) -> Line<$out_type> {
+            self.evaluator_expr3($in_name1, $in_name2, $in_name3, |a, b, c| EvaluatorExpression::$variant {
+                $in_name1: a,
+                $in_name2: b,
+                $in_name3: c,
+            })
         }
     };
 }
 
 impl Breadboard {
-    make_bb_method!(sin, Sin, BNumber, BNumber);
-    make_bb_method!(cos, Cos, BNumber, BNumber);
-    make_bb_method!(tan, Tan, BNumber, BNumber);
-    make_bb_method!(sqrt, Sqrt, BNumber, BNumber);
-    make_bb_method!(asin, Asin, BNumber, BNumber);
-    make_bb_method!(acos, Acos, BNumber, BNumber);
-    make_bb_method!(atan, Atan, BNumber, BNumber);
+    fn evaluator_expr<T: LineValue + ?Sized>(
+        &self,
+        val1: Line<impl LineValue + ?Sized>,
+        expr_fn: impl FnOnce(Box<EvaluatorExpression>) -> EvaluatorExpression,
+    ) -> Line<T> {
+        self.verify_line(&val1);
+
+        let mut eval = Evaluator::default();
+
+        let input_expr1 = Box::new(eval.get_input(val1.inner).unwrap());
+        eval.exprs.push(expr_fn(input_expr1));
+
+        self.insert_component_with_output(eval)
+    }
+
+    fn evaluator_expr2<T: LineValue + ?Sized>(
+        &self,
+        val1: Line<impl LineValue + ?Sized>,
+        val2: Line<impl LineValue + ?Sized>,
+        expr_fn: impl FnOnce(Box<EvaluatorExpression>, Box<EvaluatorExpression>) -> EvaluatorExpression,
+    ) -> Line<T> {
+        self.verify_line(&val1);
+
+        let mut eval = Evaluator::default();
+
+        let input_expr1 = Box::new(eval.get_input(val1.inner).unwrap());
+        let input_expr2 = Box::new(eval.get_input(val2.inner).unwrap());
+        eval.exprs.push(expr_fn(input_expr1, input_expr2));
+
+        self.insert_component_with_output(eval)
+    }
+
+    fn evaluator_expr3<T: LineValue + ?Sized>(
+        &self,
+        val1: Line<impl LineValue + ?Sized>,
+        val2: Line<impl LineValue + ?Sized>,
+        val3: Line<impl LineValue + ?Sized>,
+        expr_fn: impl FnOnce(Box<EvaluatorExpression>, Box<EvaluatorExpression>, Box<EvaluatorExpression>) -> EvaluatorExpression,
+    ) -> Line<T> {
+        self.verify_line(&val1);
+
+        let mut eval = Evaluator::default();
+
+        let input_expr1 = Box::new(eval.get_input(val1.inner).unwrap());
+        let input_expr2 = Box::new(eval.get_input(val2.inner).unwrap());
+        let input_expr3 = Box::new(eval.get_input(val3.inner).unwrap());
+        eval.exprs.push(expr_fn(input_expr1, input_expr2, input_expr3));
+
+        self.insert_component_with_output(eval)
+    }
+
+    make_bb_method!(sin, Sin, angle: BNumber, BNumber);
+    make_bb_method!(cos, Cos, angle: BNumber, BNumber);
+    make_bb_method!(tan, Tan, angle: BNumber, BNumber);
+    make_bb_method!(sqrt, Sqrt, num: BNumber, BNumber);
+    make_bb_method!(asin, Asin, num: BNumber, BNumber);
+    make_bb_method!(acos, Acos, num: BNumber, BNumber);
+    make_bb_method!(atan, Atan, num: BNumber, BNumber);
+    make_bb_method!(atan2, Atan2, x: BNumber, y: BNumber, BNumber);
+    make_bb_method!(exp, Exp, exponent: BNumber, BNumber);
+    make_bb_method!(log, Log, num: BNumber, BNumber);
+    make_bb_method!(pow, Pow, base: BNumber, exponent: BNumber, BNumber);
+    make_bb_method!(abs, Abs, num: BNumber, BNumber);
+    // compopnent wise absolute value
+    make_bb_method!(absv, Abs, vec: BVector3, BVector3);
+    make_bb_method!(sign, Sign, num: BNumber, BNumber);
+    make_bb_method!(round, Round, num: BNumber, BNumber);
+    make_bb_method!(floor, Floor, num: BNumber, BNumber);
+    make_bb_method!(ceil, Ceil, num: BNumber, BNumber);
+    make_bb_method!(max2, Max2, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(max3, Max3, a: BNumber, b: BNumber, c: BNumber, BNumber);
+    make_bb_method!(maxv, MaxV, vec: BVector3, BNumber);
+    make_bb_method!(min2, Min2, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(min3, Min3, a: BNumber, b: BNumber, c: BNumber, BNumber);
+    make_bb_method!(minv, MinV, vec: BVector3, BNumber);
+
+    fn b_if<T: LineValue + ?Sized>(&self, condition: Line<BNumber>, true_value: Line<T>, false_value: Line<T>) -> Line<T> {
+        self.evaluator_expr3(condition, true_value, false_value, |a, b, c| {
+            EvaluatorExpression::If {
+                condition: a,
+                true_value: b,
+                false_value: c,
+            }
+        })
+    }
+
+    make_bb_method!(vector, Vector, x: BNumber, y: BNumber, z: BNumber, BVector3);
+    make_bb_method_named!(new_rotation_between, MakeRotationBetween, from_vector: BVector3, to_vector: BVector3, BQuaternion);
+    make_bb_method_named!(rotation_from_euler_angles, FromEuler, pitch: BNumber, yaw: BNumber, roll: BNumber, BQuaternion);
+    make_bb_method!(rotation_from_euler_vector, FromEularV, vector: BVector3, BQuaternion);
+    make_bb_method!(rotation_to_euler_vector, ToEularV, rotation: BQuaternion, BVector3);
+    make_bb_method!(rotation_angle, Angle, rotation: BQuaternion, BNumber);
+    make_bb_method!(rotation_axis, Axis, rotation: BQuaternion, BVector3);
+    make_bb_method_named!(angle_between, AngleBetween, from_vector: BVector3, to_vector: BVector3, BNumber);
+    make_bb_method_named!(set_x, SetX, vector: BVector3, x: BNumber, BVector3);
+    make_bb_method_named!(set_y, SetY, vector: BVector3, y: BNumber, BVector3);
+    make_bb_method_named!(set_z, SetZ, vector: BVector3, z: BNumber, BVector3);
+
+    // properties
+    make_bb_method!(magnitude, Magnitude, vector: BVector3, BNumber);
+    make_bb_method!(square_magnitude, SquareMagnitude, vector: BVector3, BNumber);
+    make_bb_method!(rotation_inverse, RotationInverse, rotation: BQuaternion, BQuaternion);
+
+    // operators
+    make_bb_method!(add, Add, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(addv, Add, a: BVector3, b: BVector3, BVector3);
+    make_bb_method!(concat, Add, a: BString, b: BString, BString);
+
+    make_bb_method!(sub, Sub, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(subv, Sub, a: BVector3, b: BVector3, BVector3);
+    make_bb_method!(remove_instances, Sub, a: BString, b: BString, BString);
+
+    make_bb_method!(cross, Cross, a: BVector3, b: BVector3, BVector3);
+
+    make_bb_method!(mul, Mul, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(dot, Mul, a: BVector3, b: BVector3, BNumber);
+    make_bb_method!(rotate, Mul, a: BVector3, b: BQuaternion, BVector3);
+    make_bb_method!(scale, Mul, a: BNumber, b: BVector3, BVector3);
+    make_bb_method!(compose_rotations, Mul, a: BQuaternion, b: BQuaternion, BQuaternion);
+
+    make_bb_method!(div, Div, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(scaler_div, Div, a: BVector3, b: BNumber, BVector3);
+    // divide with vector and quaternion ommited because
+    // it makes more sense just to rotate by inverse of quaternion
+
+    make_bb_method!(modulo, Mod, a: BNumber, b: BNumber, BNumber);
+
+    make_bb_method!(eq, Eq, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(ne, Ne, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(gt, Gt, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(gte, Gte, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(lt, Lt, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(lte, Lte, a: BNumber, b: BNumber, BNumber);
+    
+    make_bb_method!(not, Not, n: BNumber, BNumber);
+    make_bb_method!(and, OpAnd, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(or, OpOr, a: BNumber, b: BNumber, BNumber);
+    make_bb_method!(false_coalesce, FalseCoalesce, a: BNumber, b: BNumber, BNumber);
+
+    make_bb_method!(negate, Negate, n: BNumber, BNumber);
 }
 
 #[derive(Debug)]
@@ -169,7 +326,7 @@ pub enum EvaluatorExpression {
     GetY(Box<Self>),
     GetZ(Box<Self>),
     Magnitude(Box<Self>),
-    SqruareMagnitude(Box<Self>),
+    SquareMagnitude(Box<Self>),
     RotationInverse(Box<Self>),
     // works for 2 numbers, string, or vectors
     Add(Box<Self>, Box<Self>),
@@ -190,6 +347,7 @@ pub enum EvaluatorExpression {
     Gte(Box<Self>, Box<Self>),
     Lt(Box<Self>, Box<Self>),
     Lte(Box<Self>, Box<Self>),
+    Not(Box<Self>),
     OpAnd(Box<Self>, Box<Self>),
     OpOr(Box<Self>, Box<Self>),
     FalseCoalesce(Box<Self>, Box<Self>),
@@ -280,7 +438,7 @@ impl Display for EvaluatorExpression {
             Self::GetY(val) => write!(f, "({val}).y"),
             Self::GetZ(val) => write!(f, "({val}).z"),
             Self::Magnitude(val) => write!(f, "({val}).magnitude"),
-            Self::SqruareMagnitude(val) => write!(f, "({val}).sqrMagnitude"),
+            Self::SquareMagnitude(val) => write!(f, "({val}).sqrMagnitude"),
             Self::RotationInverse(val) => write!(f, "({val}).inverse"),
             Self::Add(lhs, rhs) => write!(f, "({lhs}) + ({rhs})"),
             Self::Sub(lhs, rhs) => write!(f, "({lhs}) - ({rhs})"),
@@ -294,6 +452,7 @@ impl Display for EvaluatorExpression {
             Self::Gte(lhs, rhs) => write!(f, "({lhs}) >= ({rhs})"),
             Self::Lt(lhs, rhs) => write!(f, "({lhs}) < ({rhs})"),
             Self::Lte(lhs, rhs) => write!(f, "({lhs}) <= ({rhs})"),
+            Self::Not(val) => write!(f, "!({val})"),
             Self::OpAnd(lhs, rhs) => write!(f, "({lhs}) & ({rhs})"),
             Self::OpOr(lhs, rhs) => write!(f, "({lhs}) | ({rhs})"),
             Self::FalseCoalesce(lhs, rhs) => write!(f, "({lhs}) or ({rhs})"),
